@@ -6,7 +6,7 @@ import telebot
 from telebot import types
 from flask import Flask
 
-# --- 1. ВЕБ-СЕРВЕР ---
+# --- 1. ВЕБ-СЕРВЕР ДЛЯ RENDER ---
 app = Flask('')
 
 @app.route('/')
@@ -17,8 +17,8 @@ def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# --- 2. НАСТРОЙКИ ---
-TELEGRAM_TOKEN = "8024895868:AAG5w69mIJr1g14Oa9eU-9aNnZqXbYmK4fU"
+# --- 2. НАСТРОЙКИ (ВСТАВЛЕН ТВОЙ ТОКЕН) ---
+TELEGRAM_TOKEN = "8924895868:AAG5w69mIJrImVHp3a-YA-HzU-JyxieT0Wk"
 CHAT_ID = "7960144135"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
@@ -39,7 +39,7 @@ def send_telegram(text):
     except Exception as e:
         print(f"Ошибка Telegram: {e}", flush=True)
 
-# --- 3. ПОЛУЧЕНИЕ СВЕЧЕЙ ---
+# --- 3. ПОЛУЧЕНИЕ СВЕЧЕЙ (ОБХОД БЛОКИРОВКИ РЕГИОНА USA) ---
 def get_klines_data(symbol):
     url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100"
     try:
