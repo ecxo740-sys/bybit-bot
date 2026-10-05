@@ -1,4 +1,5 @@
 import os
+import sys
 import time
 import threading
 import requests
@@ -40,7 +41,7 @@ def send_telegram(text):
     try:
         requests.post(url, json=payload, timeout=10)
     except Exception as e:
-        print(f"Ошибка отправки Telegram: {e}")
+        print(f"Ошибка отправки Telegram: {e}", flush=True)
 
 # --- 3. ВЫЧИСЛЕНИЕ ИНДИКАТОРОВ ---
 def calculate_rsi(prices, period=14):
@@ -80,7 +81,7 @@ def calculate_ema(prices, period):
 # --- 4. АНАЛИЗ РЫНКА ---
 def analyze_market():
     global is_running, mode, strategy, last_signals
-    print("--- [ПОИСК СИГНАЛОВ ЗАПУЩЕН] ---")
+    print("--- [ПОИСК СИГНАЛОВ ЗАПУЩЕН] ---", flush=True)
     
     category = "linear" if mode == "futures" else "spot"
     
@@ -110,15 +111,15 @@ def analyze_market():
             ema_21 = calculate_ema(close_prices, 21)
             ema_200 = calculate_ema(close_prices, 200)
             
-            print(f"[{symbol}] Цена: {current_price} | RSI: {rsi_val} | EMA9: {ema_9} | EMA21: {ema_21}")
+            print(f"[{symbol}] Цена: {current_price} | RSI: {rsi_val} | EMA9: {ema_9} | EMA21: {ema_21}", flush=True)
             
             signal_type = None
             
-            # Логика стратегий (Мягкие условия)
+            # Логика стратегий (Мягкие пороги)
             if strategy == "rsi":
-                if rsi_val <= 40:
+                if rsi_val <= 45:
                     signal_type = "BUY 🟢 (Перепроданность RSI)"
-                elif rsi_val >= 60:
+                elif rsi_val >= 55:
                     signal_type = "SELL 🔴 (Перекупленность RSI)"
                     
             elif strategy == "ema_cross":
@@ -128,14 +129,14 @@ def analyze_market():
                     signal_type = "SELL 🔴 (Пересечение EMA 9/21 Вниз)"
                     
             elif strategy == "smart_trend":
-                if current_price > ema_200 and rsi_val < 45:
+                if current_price > ema_200 and rsi_val < 50:
                     signal_type = "BUY 🟢 (Трендовый откат EMA200)"
-                elif current_price < ema_200 and rsi_val > 55:
+                elif current_price < ema_200 and rsi_val > 50:
                     signal_type = "SELL 🔴 (Трендовый откат EMA200)"
 
-            # Защита от дублей в течение 15 минут
+            # Отправка сигнала
             last_time = last_signals.get(f"{symbol}_{strategy}", 0)
-            if signal_type and (time.time() - last_time > 900):
+            if signal_type and (time.time() - last_time > 300):  # Задержка между одинаковыми сигналами 5 минут
                 msg = (
                     f"🚀 <b>СИГНАЛ: {symbol}</b>\n"
                     f"<b>Тип:</b> {signal_type}\n"
@@ -146,22 +147,23 @@ def analyze_market():
                 )
                 send_telegram(msg)
                 last_signals[f"{symbol}_{strategy}"] = time.time()
-                print(f">>> ОТПРАВЛЕН СИГНАЛ В TELEGRAM ПО {symbol}!")
+                print(f">>> ОТПРАВЛЕН СИГНАЛ В TELEGRAM ПО {symbol}!", flush=True)
 
         except Exception as e:
-            print(f"Ошибка анализа {symbol}: {e}")
+            print(f"Ошибка анализа {symbol}: {e}", flush=True)
             
         time.sleep(0.5)
 
 # --- 5. ГЛАВНЫЙ ЦИКЛ ---
 def main_loop():
-    send_telegram("🤖 Бот успешно запущен на Render и начинает сканирование!")
+    send_telegram("🤖 Бот успешно обновлен и начинает сканирование!")
+    print("=== ОСНОВНОЙ ЦИКЛ ЗАПУЩЕН ===", flush=True)
     while True:
         if is_running:
             analyze_market()
         else:
-            print("Бот на паузе...")
-        time.sleep(30)  # Проверка каждые 30 секунд
+            print("Бот на паузе...", flush=True)
+        time.sleep(15)  # Проверка каждые 15 секунд
 
 if __name__ == "__main__":
     main_loop()
