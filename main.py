@@ -17,7 +17,7 @@ def run_flask():
     port = int(os.environ.get("PORT", 8080))
     app.run(host='0.0.0.0', port=port)
 
-# --- 2. НАСТРОЙКИ (ВСТАВЛЕН ТВОЙ ТОКЕН) ---
+# --- 2. НАСТРОЙКИ ---
 TELEGRAM_TOKEN = "8924895868:AAG5w69mIJrImVHp3a-YA-HzU-JyxieT0Wk"
 CHAT_ID = "7960144135"
 
@@ -39,7 +39,7 @@ def send_telegram(text):
     except Exception as e:
         print(f"Ошибка Telegram: {e}", flush=True)
 
-# --- 3. ПОЛУЧЕНИЕ СВЕЧЕЙ (ОБХОД БЛОКИРОВКИ РЕГИОНА USA) ---
+# --- 3. ПОЛУЧЕНИЕ СВЕЧЕЙ ---
 def get_klines_data(symbol):
     url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100"
     try:
@@ -86,55 +86,66 @@ def calculate_ema(prices, period):
         ema = (price * k) + (ema * (1 - k))
     return round(ema, 4)
 
-# --- 5. TELEGRAM МЕНЮ ---
+# --- 5. ИНЛАЙН-МЕНЮ И ОБРАБОТКА ---
 def get_main_keyboard():
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-    btn1 = types.KeyboardButton("🎯 Умный Трендовый Снайпер (EMA200)")
-    btn2 = types.KeyboardButton("🔥 Экстремальный RSI")
-    btn3 = types.KeyboardButton("📈 Пересечение EMA")
+    markup = types.InlineKeyboardMarkup(row_width=1)
     
-    pause_txt = "▶ Возобновить" if not is_running else "⏸ Приостановить"
-    btn4 = types.KeyboardButton(pause_txt)
+    s1 = "✅ " if strategy == "smart_trend" else ""
+    s2 = "✅ " if strategy == "rsi" else ""
+    s3 = "✅ " if strategy == "ema_cross" else ""
     
-    mode_txt = "🟢 Переключить на Spot" if mode == "futures" else "🔴 Переключить на Futures"
-    btn5 = types.KeyboardButton(mode_txt)
-    btn6 = types.KeyboardButton("ℹ️ Текущий статус")
+    btn1 = types.InlineKeyboardButton(f"{s1}🎯 Умный Трендовый Снайпер (EMA200)", callback_data="strat_smart_trend")
+    btn2 = types.InlineKeyboardButton(f"{s2}🔥 Экстремальный RSI", callback_data="strat_rsi")
+    btn3 = types.InlineKeyboardButton(f"{s3}📈 Пересечение EMA (9/21)", callback_data="strat_ema_cross")
     
-    markup.row(btn1)
-    markup.row(btn2, btn3)
-    markup.row(btn4, btn5)
-    markup.row(btn6)
+    mode_label = "🟢 Рынок: SPOT (нажми для FUTURES)" if mode == "spot" else "🔴 Рынок: FUTURES (нажми для SPOT)"
+    btn_mode = types.InlineKeyboardButton(mode_label, callback_data="toggle_mode")
+    
+    pause_label = "▶️️ Возобновить работу" if not is_running else "⏸️ Поставить на паузу"
+    btn_pause = types.InlineKeyboardButton(pause_label, callback_data="toggle_pause")
+    
+    btn_status = types.InlineKeyboardButton("ℹ️ Проверить статус", callback_data="check_status")
+
+    markup.add(btn1, btn2, btn3, btn_mode, btn_pause, btn_status)
     return markup
 
-@bot.message_handler(commands=['start'])
+@bot.message_handler(commands=['start', 'menu'])
 def start_cmd(message):
-    bot.send_message(message.chat.id, "🤖 Бот подключен и готовит аналитику!", reply_markup=get_main_keyboard())
+    bot.send_message(
+        message.chat.id, 
+        f"🤖 <b>Панель управления AI Signals</b>\n\nТекущий рынок: <b>{mode.upper()}</b>\nАктивная стратегия: <b>{strategy.upper()}</b>", 
+        parse_mode="HTML", 
+        reply_markup=get_main_keyboard()
+    )
 
-@bot.message_handler(func=lambda m: True)
-def handle_menu(message):
+@bot.callback_query_handler(func=lambda call: True)
+def callback_inline(call):
     global is_running, mode, strategy
-    txt = message.text
-
-    if "Снайпер" in txt:
-        strategy = "smart_trend"
-        bot.send_message(message.chat.id, "🎯 Стратегия: Умный Трендовый Снайпер", reply_markup=get_main_keyboard())
-    elif "Экстремальный RSI" in txt:
-        strategy = "rsi"
-        bot.send_message(message.chat.id, "🔥 Стратегия: Экстремальный RSI", reply_markup=get_main_keyboard())
-    elif "Пересечение EMA" in txt:
-        strategy = "ema_cross"
-        bot.send_message(message.chat.id, "📈 Стратегия: Пересечение EMA 9/21", reply_markup=get_main_keyboard())
-    elif "Приостановить" in txt or "Возобновить" in txt:
-        is_running = not is_running
-        status = "активен 🟢" if is_running else "на паузе ⏸"
-        bot.send_message(message.chat.id, f"Состояние: {status}", reply_markup=get_main_keyboard())
-    elif "Переключить на" in txt:
+    
+    if call.data.startswith("strat_"):
+        strategy = call.data.replace("strat_", "")
+        bot.answer_callback_query(call.id, f"Стратегия изменена на {strategy.upper()}")
+    elif call.data == "toggle_mode":
         mode = "spot" if mode == "futures" else "futures"
-        bot.send_message(message.chat.id, f"Режим: {mode.upper()}", reply_markup=get_main_keyboard())
-    elif "Текущий статус" in txt:
+        bot.answer_callback_query(call.id, f"Режим изменен на {mode.upper()}")
+    elif call.data == "toggle_pause":
+        is_running = not is_running
+        st = "запущен 🟢" if is_running else "на паузе ⏸"
+        bot.answer_callback_query(call.id, f"Бот {st}")
+    elif call.data == "check_status":
         st = "Активен 🟢" if is_running else "На паузе ⏸"
-        msg = f"<b>Статус:</b> {st}\n<b>Рынок:</b> {mode.upper()}\n<b>Стратегия:</b> {strategy.upper()}"
-        bot.send_message(message.chat.id, msg, parse_mode="HTML", reply_markup=get_main_keyboard())
+        bot.answer_callback_query(call.id, f"Статус: {st} | Режим: {mode.upper()}")
+
+    try:
+        bot.edit_message_text(
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            text=f"🤖 <b>Панель управления AI Signals</b>\n\nТекущий рынок: <b>{mode.upper()}</b>\nАктивная стратегия: <b>{strategy.upper()}</b>",
+            parse_mode="HTML",
+            reply_markup=get_main_keyboard()
+        )
+    except Exception:
+        pass
 
 # --- 6. МОНИТОРИНГ РЫНКА ---
 def analyze_market():
