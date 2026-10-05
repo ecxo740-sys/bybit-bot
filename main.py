@@ -18,7 +18,7 @@ def run_flask():
     app.run(host='0.0.0.0', port=port)
 
 # --- 2. НАСТРОЙКИ ---
-TELEGRAM_TOKEN = "8924895868:AAG5w69mIJr"
+TELEGRAM_TOKEN = "8024895868:AAG5w69mIJr1g14Oa9eU-9aNnZqXbYmK4fU"
 CHAT_ID = "7960144135"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
@@ -39,15 +39,13 @@ def send_telegram(text):
     except Exception as e:
         print(f"Ошибка Telegram: {e}", flush=True)
 
-# --- 3. ПОЛУЧЕНИЕ СВЕЧЕЙ (Используем API Binance как альтернативный источник котировок, если Bybit банит IP) ---
+# --- 3. ПОЛУЧЕНИЕ СВЕЧЕЙ ---
 def get_klines_data(symbol):
-    # Запрос к публичному API Binance (не банит Render и совпадает по ценам на 99.9%)
     url = f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=15m&limit=100"
     try:
         res = requests.get(url, timeout=10)
         if res.status_code == 200:
             data = res.json()
-            # Формат свечи Binance: [time, open, high, low, close, ...]
             return [float(item[4]) for item in data]
     except Exception as e:
         print(f"Ошибка получения свечей {symbol}: {e}", flush=True)
@@ -95,7 +93,7 @@ def get_main_keyboard():
     btn2 = types.KeyboardButton("🔥 Экстремальный RSI")
     btn3 = types.KeyboardButton("📈 Пересечение EMA")
     
-    pause_txt = "▶️️ Возобновить" if not is_running else "⏸ Приостановить"
+    pause_txt = "▶ Возобновить" if not is_running else "⏸ Приостановить"
     btn4 = types.KeyboardButton(pause_txt)
     
     mode_txt = "🟢 Переключить на Spot" if mode == "futures" else "🔴 Переключить на Futures"
@@ -197,12 +195,9 @@ def start_telebot():
             time.sleep(5)
 
 if __name__ == "__main__":
-    # Запуск фоновых потоков
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=analyze_market, daemon=True).start()
     
-    # Отправка стартового сообщения
     send_telegram("🤖 Бот успешно запущен и ведет анализ рынка!")
     
-    # Запуск Telegram бота в основном потоке
     start_telebot()
