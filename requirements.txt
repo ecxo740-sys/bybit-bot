@@ -1,3 +1,4 @@
-pybit
-requests
 flask
+requests
+pybit
+pyTelegramBotAPI
