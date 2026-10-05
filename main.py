@@ -114,7 +114,7 @@ def get_main_keyboard():
     s3 = "✅ " if strategy == "ema_cross" else ""
     
     btn1 = types.InlineKeyboardButton(f"{s1}🎯 Умный Трендовый Снайпер", callback_data="strat_smart_trend")
-    btn2 = types.InlineKeyboardButton(f"{s2}🔥 Сигналы по RSI", callback_data="strat_rsi")
+    btn2 = types.InlineKeyboardButton(f"{s2}🔥 Сигналы по RSI (Чувствительные)", callback_data="strat_rsi")
     btn3 = types.InlineKeyboardButton(f"{s3}📈 Пересечение EMA (9/21)", callback_data="strat_ema_cross")
     
     mode_text = "🟡 Режим: SPOT (Нажми для FUTURES)" if mode == "spot" else "🔴 Режим: FUTURES (Нажми для SPOT)"
@@ -185,10 +185,11 @@ def analyze_market():
                 signal_type = None
                 
                 if strategy == "rsi":
-                    if rsi_val <= 40:
-                        signal_type = "LONG 🟢 (RSI Перепроданность)"
-                    elif rsi_val >= 60:
-                        signal_type = "SHORT 🔴 (RSI Перекупленность)"
+                    # Смягченные пороги для частых сигналов
+                    if rsi_val <= 48:
+                        signal_type = "LONG 🟢 (RSI Зона покупки)"
+                    elif rsi_val >= 52:
+                        signal_type = "SHORT 🔴 (RSI Зона продажи)"
                         
                 elif strategy == "ema_cross":
                     if ema_9 > ema_21:
@@ -206,7 +207,8 @@ def analyze_market():
                 sig_key = f"{symbol}_{mode}_{strategy}"
                 last_time = last_signals.get(sig_key, 0)
                 
-                if signal_type and (time.time() - last_time > 180):
+                # Уменьшили кулдаун до 60 секунд
+                if signal_type and (time.time() - last_time > 60):
                     msg = (
                         f"🚨 <b>СИГНАЛ BYBIT [{mode.upper()}]</b>\n\n"
                         f"<b>Монета:</b> #{symbol}\n"
@@ -233,5 +235,5 @@ if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=analyze_market, daemon=True).start()
     
-    send_telegram("🚀 <b>Бот обновлен: загружено 30 пар для Spot и Futures!</b>")
+    send_telegram("🚀 <b>Бот обновлен: повышенная чувствительность сигналов включена!</b>")
     start_telebot()
