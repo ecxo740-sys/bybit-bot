@@ -6,7 +6,6 @@ import requests
 import telebot
 from telebot import types
 from flask import Flask
-from pybit.unified_trading import HTTP
 
 # --- 1. ВЕБ-СЕРВЕР ДЛЯ RENDER ---
 app = Flask('')
@@ -26,7 +25,6 @@ TELEGRAM_TOKEN = "8924895868:AAG5w69mIJr"
 CHAT_ID = "7960144135"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
-session = HTTP(testnet=False)
 
 SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
@@ -44,7 +42,23 @@ def send_telegram(text):
     except Exception as e:
         print(f"Ошибка Telegram: {e}", flush=True)
 
-# --- 3. РАСЧЕТ ИНДИКАТОРОВ ---
+# --- 3. ПОЛУЧЕНИЕ СВЕЧЕЙ ЧЕРЕЗ REQUESTS С HEADERS ---
+def get_bybit_klines(symbol, category="linear"):
+    url = f"https://api.bybit.com/v5/market/kline?category={category}&symbol={symbol}&interval=15&limit=100"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Accept": "application/json"
+    }
+    try:
+        res = requests.get(url, headers=headers, timeout=10)
+        data = res.json()
+        if data.get("retCode") == 0:
+            return data.get("result", {}).get("list", [])
+    except Exception as e:
+        print(f"Ошибка запроса {symbol}: {e}", flush=True)
+    return []
+
+# --- 4. РАСЧЕТ ИНДИКАТОРОВ ---
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1:
         return 50.0
@@ -79,7 +93,7 @@ def calculate_ema(prices, period):
         ema = (price * k) + (ema * (1 - k))
     return round(ema, 4)
 
-# --- 4. КНОПКИ В TELEGRAM ---
+# --- 5. КНОПКИ В TELEGRAM ---
 def get_main_keyboard():
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
     btn1 = types.KeyboardButton("🎯 Умный Трендовый Снайпер (EMA200)")
@@ -101,7 +115,7 @@ def get_main_keyboard():
 
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    bot.send_message(message.chat.id, "🤖 Бот запущен и готов к работе!", reply_markup=get_main_keyboard())
+    bot.send_message(message.chat.id, "🤖 Бот подключен и готов к анализу рынка!", reply_markup=get_main_keyboard())
 
 @bot.message_handler(func=lambda m: True)
 def handle_menu(message):
@@ -139,7 +153,7 @@ def start_telebot():
 
 threading.Thread(target=start_telebot, daemon=True).start()
 
-# --- 5. АНАЛИЗ РЫНКА ---
+# --- 6. АНАЛИЗ РЫНКА ---
 def analyze_market():
     global is_running, mode, strategy, last_signals
     category = "linear" if mode == "futures" else "spot"
@@ -148,64 +162,60 @@ def analyze_market():
         if not is_running:
             break
             
-        try:
-            response = session.get_kline(category=category, symbol=symbol, interval="15", limit=100)
-            klines = response.get("result", {}).get("list", [])
-            if not klines:
-                continue
-                
-            klines.reverse()
-            close_prices = [float(k[4]) for k in klines]
-            current_price = close_prices[-1]
+        klines = get_bybit_klines(symbol, category)
+        if not klines:
+            time.sleep(1)
+            continue
             
-            rsi_val = calculate_rsi(close_prices)
-            ema_9 = calculate_ema(close_prices, 9)
-            ema_21 = calculate_ema(close_prices, 21)
-            ema_200 = calculate_ema(close_prices, 200)
-            
-            signal_type = None
-            
-            if strategy == "rsi":
-                if rsi_val <= 45:
-                    signal_type = "BUY 🟢 (Перепроданность RSI)"
-                elif rsi_val >= 55:
-                    signal_type = "SELL 🔴 (Перекупленность RSI)"
-            elif strategy == "ema_cross":
-                if ema_9 > ema_21 and close_prices[-2] <= calculate_ema(close_prices[:-1], 21):
-                    signal_type = "BUY 🟢 (Пересечение EMA Вверх)"
-                elif ema_9 < ema_21 and close_prices[-2] >= calculate_ema(close_prices[:-1], 21):
-                    signal_type = "SELL 🔴 (Пересечение EMA Вниз)"
-            elif strategy == "smart_trend":
-                if current_price > ema_200 and rsi_val < 50:
-                    signal_type = "BUY 🟢 (Трендовый откат EMA200)"
-                elif current_price < ema_200 and rsi_val > 50:
-                    signal_type = "SELL 🔴 (Трендовый откат EMA200)"
+        klines.reverse()
+        close_prices = [float(k[4]) for k in klines]
+        current_price = close_prices[-1]
+        
+        rsi_val = calculate_rsi(close_prices)
+        ema_9 = calculate_ema(close_prices, 9)
+        ema_21 = calculate_ema(close_prices, 21)
+        ema_200 = calculate_ema(close_prices, 200)
+        
+        signal_type = None
+        
+        if strategy == "rsi":
+            if rsi_val <= 45:
+                signal_type = "BUY 🟢 (Перепроданность RSI)"
+            elif rsi_val >= 55:
+                signal_type = "SELL 🔴 (Перекупленность RSI)"
+        elif strategy == "ema_cross":
+            if ema_9 > ema_21 and close_prices[-2] <= calculate_ema(close_prices[:-1], 21):
+                signal_type = "BUY 🟢 (Пересечение EMA Вверх)"
+            elif ema_9 < ema_21 and close_prices[-2] >= calculate_ema(close_prices[:-1], 21):
+                signal_type = "SELL 🔴 (Пересечение EMA Вниз)"
+        elif strategy == "smart_trend":
+            if current_price > ema_200 and rsi_val < 50:
+                signal_type = "BUY 🟢 (Трендовый откат EMA200)"
+            elif current_price < ema_200 and rsi_val > 50:
+                signal_type = "SELL 🔴 (Трендовый откат EMA200)"
 
-            last_time = last_signals.get(f"{symbol}_{strategy}", 0)
-            if signal_type and (time.time() - last_time > 300):
-                msg = (
-                    f"🚀 <b>СИГНАЛ: {symbol}</b>\n"
-                    f"<b>Тип:</b> {signal_type}\n"
-                    f"<b>Рынок:</b> {mode.upper()}\n"
-                    f"<b>Цена:</b> {current_price}\n"
-                    f"<b>RSI:</b> {rsi_val}"
-                )
-                send_telegram(msg)
-                last_signals[f"{symbol}_{strategy}"] = time.time()
-
-        except Exception as e:
-            print(f"Ошибка {symbol}: {e}", flush=True)
+        last_time = last_signals.get(f"{symbol}_{strategy}", 0)
+        if signal_type and (time.time() - last_time > 300):
+            msg = (
+                f"🚀 <b>СИГНАЛ: {symbol}</b>\n"
+                f"<b>Тип:</b> {signal_type}\n"
+                f"<b>Рынок:</b> {mode.upper()}\n"
+                f"<b>Цена:</b> {current_price}\n"
+                f"<b>RSI:</b> {rsi_val}"
+            )
+            send_telegram(msg)
+            last_signals[f"{symbol}_{strategy}"] = time.time()
             
-        time.sleep(0.3)
+        time.sleep(1)
 
-# --- 6. ОСНОВНОЙ ЦИКЛ ---
+# --- 7. ОСНОВНОЙ ЦИКЛ ---
 def main_loop():
     time.sleep(3)
-    send_telegram("🤖 Бот успешно запущен на Render!")
+    send_telegram("🤖 Бот успешно запущен и начинает анализ!")
     while True:
         if is_running:
             analyze_market()
-        time.sleep(15)
+        time.sleep(10)
 
 if __name__ == "__main__":
     main_loop()
