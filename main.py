@@ -23,9 +23,14 @@ CHAT_ID = "7960144135"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
+# 30 Торговых пар (Spot и Futures)
 SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
-    "ADAUSDT", "AVAXUSDT", "NEARUSDT", "LINKUSDT", "DOTUSDT"
+    "ADAUSDT", "AVAXUSDT", "NEARUSDT", "LINKUSDT", "DOTUSDT",
+    "SUIUSDT", "PEPEUSDT", "RENDERUSDT", "APTUSDT", "MATICUSDT",
+    "ARBUSDT", "OPUSDT", "TIAUSDT", "INJUSDT", "FETUSDT",
+    "ATOMUSDT", "LTCUSDT", "BCHUSDT", "ETCUSDT", "UNIUSDT",
+    "ICPUSDT", "FILUSDT", "STXUSDT", "IMXUSDT", "KASUSDT"
 ]
 
 is_running = True
@@ -49,14 +54,13 @@ def get_bybit_klines(symbol, current_mode):
         if res.status_code == 200:
             data = res.json()
             if data.get("retCode") == 0 and data["result"]["list"]:
-                # Bybit возвращает данные от свежих к старым
                 raw_list = data["result"]["list"]
                 raw_list.reverse()
-                return [float(item[4]) for item in raw_list] # Цены закрытия
+                return [float(item[4]) for item in raw_list]
     except Exception as e:
         print(f"Ошибка Bybit API ({symbol}): {e}", flush=True)
     
-    # Резервный источник (Binance) если Bybit лагает
+    # Резервный источник (Binance)
     try:
         res = requests.get(f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=5m&limit=50", timeout=5)
         if res.status_code == 200:
@@ -128,7 +132,7 @@ def get_main_keyboard():
 def start_cmd(message):
     bot.send_message(
         message.chat.id, 
-        f"🤖 <b>Панель управления Bybit AI Signals</b>\n\nТекущий рынок: <b>{mode.upper()}</b>\nСтратегия: <b>{strategy.upper()}</b>\n\nВыбери настройки кнопками ниже:", 
+        f"🤖 <b>Панель управления Bybit AI Signals</b>\n\nМониторинг пар: <b>30 штук</b>\nРынок: <b>{mode.upper()}</b>\nСтратегия: <b>{strategy.upper()}</b>", 
         parse_mode="HTML", 
         reply_markup=get_main_keyboard()
     )
@@ -149,13 +153,13 @@ def callback_inline(call):
         bot.answer_callback_query(call.id, f"Бот {st}")
     elif call.data == "check_status":
         st = "Активен 🟢" if is_running else "На паузе ⏸"
-        bot.answer_callback_query(call.id, f"Статус: {st} | Рынок: {mode.upper()}", show_alert=True)
+        bot.answer_callback_query(call.id, f"Статус: {st} | Пар: 30 | Рынок: {mode.upper()}", show_alert=True)
 
     try:
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text=f"🤖 <b>Панель управления Bybit AI Signals</b>\n\nТекущий рынок: <b>{mode.upper()}</b>\nСтратегия: <b>{strategy.upper()}</b>\n\nВыбери настройки кнопками ниже:",
+            text=f"🤖 <b>Панель управления Bybit AI Signals</b>\n\nМониторинг пар: <b>30 штук</b>\nРынок: <b>{mode.upper()}</b>\nСтратегия: <b>{strategy.upper()}</b>",
             parse_mode="HTML",
             reply_markup=get_main_keyboard()
         )
@@ -180,7 +184,6 @@ def analyze_market():
                 
                 signal_type = None
                 
-                # Пороги снижены, чтобы сигналы приходили регулярно
                 if strategy == "rsi":
                     if rsi_val <= 40:
                         signal_type = "LONG 🟢 (RSI Перепроданность)"
@@ -200,7 +203,6 @@ def analyze_market():
                     elif current_price < ema_50 and rsi_val < 52:
                         signal_type = "SHORT 🔴 (Медвежий тренд ниже EMA50)"
 
-                # Защита от спама: сигнал по одной и той же паре раз в 3 минуты
                 sig_key = f"{symbol}_{mode}_{strategy}"
                 last_time = last_signals.get(sig_key, 0)
                 
@@ -209,14 +211,14 @@ def analyze_market():
                         f"🚨 <b>СИГНАЛ BYBIT [{mode.upper()}]</b>\n\n"
                         f"<b>Монета:</b> #{symbol}\n"
                         f"<b>Направление:</b> {signal_type}\n"
-                        f"<b>Текущая цена:</b> ${current_price}\n"
+                        f"<b>Цена:</b> ${current_price}\n"
                         f"<b>RSI:</b> {rsi_val}\n"
                         f"<b>Стратегия:</b> {strategy.upper()}"
                     )
                     send_telegram(msg)
                     last_signals[sig_key] = time.time()
                 
-                time.sleep(0.3)
+                time.sleep(0.2)
         time.sleep(5)
 
 def start_telebot():
@@ -231,5 +233,5 @@ if __name__ == "__main__":
     threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=analyze_market, daemon=True).start()
     
-    send_telegram("🚀 <b>Bybit Бот обновлен и запущен!</b>\nНажми /start чтобы открыть меню.")
+    send_telegram("🚀 <b>Бот обновлен: загружено 30 пар для Spot и Futures!</b>")
     start_telebot()
