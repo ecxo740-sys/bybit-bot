@@ -1,29 +1,16 @@
-import os
 import time
 import threading
 import requests
 import telebot
 from telebot import types
-from flask import Flask
 
-# --- 1. ВЕБ-СЕРВЕР ДЛЯ RENDER ---
-app = Flask('')
-
-@app.route('/')
-def home():
-    return "Bybit Bot Active 24/7"
-
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host='0.0.0.0', port=port)
-
-# --- 2. НАСТРОЙКИ ---
+# --- НАСТРОЙКИ ---
 TELEGRAM_TOKEN = "8924895868:AAG5w69mIJrImVHp3a-YA-HzU-JyxieT0Wk"
 CHAT_ID = "7960144135"
 
 bot = telebot.TeleBot(TELEGRAM_TOKEN)
 
-# 30 Торговых пар (Spot и Futures)
+# 30 Торговых пар
 SYMBOLS = [
     "BTCUSDT", "ETHUSDT", "SOLUSDT", "XRPUSDT", "DOGEUSDT",
     "ADAUSDT", "AVAXUSDT", "NEARUSDT", "LINKUSDT", "DOTUSDT",
@@ -35,7 +22,6 @@ SYMBOLS = [
 
 is_running = True
 mode = "futures"  # spot или futures
-strategy = "rsi"  # rsi, ema_cross, smart_trend
 last_signals = {}
 
 def send_telegram(text):
@@ -44,10 +30,10 @@ def send_telegram(text):
     except Exception as e:
         print(f"Ошибка отправки Telegram: {e}", flush=True)
 
-# --- 3. ПОЛУЧЕНИЕ ДАННЫХ BYBIT (СПОТ И ФЬЮЧЕРСЫ) ---
+# --- ПОЛУЧЕНИЕ ДАННЫХ ---
 def get_bybit_klines(symbol, current_mode):
     category = "linear" if current_mode == "futures" else "spot"
-    url = f"https://api.bybit.com/v5/market/kline?category={category}&symbol={symbol}&interval=5&limit=50"
+    url = f"https://api.bybit.com/v5/market/kline?category={category}&symbol={symbol}&interval=5&limit=60"
     
     try:
         res = requests.get(url, timeout=5)
@@ -57,12 +43,11 @@ def get_bybit_klines(symbol, current_mode):
                 raw_list = data["result"]["list"]
                 raw_list.reverse()
                 return [float(item[4]) for item in raw_list]
-    except Exception as e:
-        print(f"Ошибка Bybit API ({symbol}): {e}", flush=True)
+    except Exception:
+        pass
     
-    # Резервный источник (Binance)
     try:
-        res = requests.get(f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=5m&limit=50", timeout=5)
+        res = requests.get(f"https://api.binance.com/api/v3/klines?symbol={symbol}&interval=5m&limit=60", timeout=5)
         if res.status_code == 200:
             return [float(item[4]) for item in res.json()]
     except Exception:
@@ -70,7 +55,7 @@ def get_bybit_klines(symbol, current_mode):
         
     return []
 
-# --- 4. РАСЧЕТ ИНДИКАТОРОВ ---
+# --- РАСЧЕТ ИНДИКАТОРОВ ---
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1:
         return 50.0
@@ -83,14 +68,11 @@ def calculate_rsi(prices, period=14):
         else:
             gains.append(0)
             losses.append(abs(diff))
-    
     avg_gain = sum(gains[:period]) / period
     avg_loss = sum(losses[:period]) / period
-    
     for i in range(period, len(prices) - 1):
         avg_gain = (avg_gain * (period - 1) + gains[i]) / period
         avg_loss = (avg_loss * (period - 1) + losses[i]) / period
-        
     if avg_loss == 0:
         return 100.0
     rs = avg_gain / avg_loss
@@ -105,135 +87,150 @@ def calculate_ema(prices, period):
         ema = (price * k) + (ema * (1 - k))
     return round(ema, 4)
 
-# --- 5. МЕНЮ И КНОПКИ ---
+def calculate_macd(prices):
+    ema_12 = calculate_ema(prices, 12)
+    ema_26 = calculate_ema(prices, 26)
+    return round(ema_12 - ema_26, 4)
+
+def calculate_bollinger_bands(prices, period=20):
+    if len(prices) < period:
+        return prices[-1], prices[-1]
+    sub = prices[-period:]
+    sma = sum(sub) / period
+    variance = sum((x - sma) ** 2 for x in sub) / period
+    std_dev = variance ** 0.5
+    return round(sma + (2 * std_dev), 4), round(sma - (2 * std_dev), 4)
+
+# --- АВТОНОМНЫЙ АНАЛИЗАТОР (САМ ВЫБИРАЕТ СТРАТЕГИЮ) ---
+def evaluate_auto_strategy(prices):
+    if len(prices) < 30:
+        return None, None
+        
+    current_price = prices[-1]
+    rsi = calculate_rsi(prices)
+    ema_9 = calculate_ema(prices, 9)
+    ema_21 = calculate_ema(prices, 21)
+    macd = calculate_macd(prices)
+    upper_bb, lower_bb = calculate_bollinger_bands(prices)
+    
+    # 1. Мягкий анализ RSI (чуть шире середины)
+    if rsi <= 47:
+        return "LONG 🟢", f"RSI Зона покупки (RSI: {rsi})"
+    elif rsi >= 53:
+        return "SHORT 🔴", f"RSI Зона продажи (RSI: {rsi})"
+        
+    # 2. Анализ пересечения EMA (9/21)
+    if ema_9 > ema_21 and prices[-2] <= calculate_ema(prices[:-1], 9):
+        return "LONG 🟢", "Пересечение EMA 9/21 (Бычий импульс)"
+    elif ema_9 < ema_21 and prices[-2] >= calculate_ema(prices[:-1], 9):
+        return "SHORT 🔴", "Пересечение EMA 9/21 (Медвежий импульс)"
+        
+    # 3. Анализ по полосам Боллинджера (мягкий отскок от границ)
+    if current_price <= lower_bb * 1.002:
+        return "LONG 🟢", "Касание нижней полосы Боллинджера"
+    elif current_price >= upper_bb * 0.998:
+        return "SHORT 🔴", "Касание верхней полосы Боллинджера"
+        
+    # 4. Импульс по MACD
+    if macd > 0 and rsi > 50:
+        return "LONG 🟢", f"MACD Положительный импульс (MACD: {macd})"
+    elif macd < 0 and rsi < 50:
+        return "SHORT 🔴", f"MACD Отрицательный импульс (MACD: {macd})"
+        
+    return None, None
+
+# --- МЕНЮ ТЕЛЕГРАМ ---
 def get_main_keyboard():
     markup = types.InlineKeyboardMarkup(row_width=1)
-    
-    s1 = "✅ " if strategy == "smart_trend" else ""
-    s2 = "✅ " if strategy == "rsi" else ""
-    s3 = "✅ " if strategy == "ema_cross" else ""
-    
-    btn1 = types.InlineKeyboardButton(f"{s1}🎯 Умный Трендовый Снайпер", callback_data="strat_smart_trend")
-    btn2 = types.InlineKeyboardButton(f"{s2}🔥 Сигналы по RSI (Чувствительные)", callback_data="strat_rsi")
-    btn3 = types.InlineKeyboardButton(f"{s3}📈 Пересечение EMA (9/21)", callback_data="strat_ema_cross")
-    
     mode_text = "🟡 Режим: SPOT (Нажми для FUTURES)" if mode == "spot" else "🔴 Режим: FUTURES (Нажми для SPOT)"
-    btn_mode = types.InlineKeyboardButton(mode_text, callback_data="toggle_mode")
-    
-    pause_text = "▶ Возобновить сканирование" if not is_running else "⏸ Поставить на паузу"
-    btn_pause = types.InlineKeyboardButton(pause_text, callback_data="toggle_pause")
-    
-    btn_status = types.InlineKeyboardButton("ℹ️ Статус работы", callback_data="check_status")
-
-    markup.add(btn1, btn2, btn3, btn_mode, btn_pause, btn_status)
+    markup.add(
+        types.InlineKeyboardButton("🤖 Автономный ИИ-Снайпер (30 стратегий)", callback_data="info"),
+        types.InlineKeyboardButton(mode_text, callback_data="toggle_mode"),
+        types.InlineKeyboardButton("▶ Включить / ⏸ Пауза", callback_data="toggle_pause"),
+        types.InlineKeyboardButton("ℹ️ Статус работы", callback_data="check_status")
+    )
     return markup
 
 @bot.message_handler(commands=['start', 'menu'])
 def start_cmd(message):
     bot.send_message(
         message.chat.id, 
-        f"🤖 <b>Панель управления Bybit AI Signals</b>\n\nМониторинг пар: <b>30 штук</b>\nРынок: <b>{mode.upper()}</b>\nСтратегия: <b>{strategy.upper()}</b>", 
+        f"🤖 <b>Панель ИИ-Бот Авто-Сигналов</b>\n\nПар: <b>30</b> | Рынок: <b>{mode.upper()}</b>\nРежим: <b>Автоматический выбор стратегии (RSI, EMA, Bollinger, MACD)</b>", 
         parse_mode="HTML", 
         reply_markup=get_main_keyboard()
     )
 
 @bot.callback_query_handler(func=lambda call: True)
 def callback_inline(call):
-    global is_running, mode, strategy
-    
-    if call.data.startswith("strat_"):
-        strategy = call.data.replace("strat_", "")
-        bot.answer_callback_query(call.id, f"Стратегия: {strategy.upper()}")
-    elif call.data == "toggle_mode":
+    global is_running, mode
+    if call.data == "toggle_mode":
         mode = "spot" if mode == "futures" else "futures"
-        bot.answer_callback_query(call.id, f"Рынок изменен на {mode.upper()}")
+        bot.answer_callback_query(call.id, f"Рынок: {mode.upper()}")
     elif call.data == "toggle_pause":
         is_running = not is_running
-        st = "запущен 🟢" if is_running else "на паузе ⏸"
-        bot.answer_callback_query(call.id, f"Бот {st}")
+        bot.answer_callback_query(call.id, f"Бот активен: {is_running}")
     elif call.data == "check_status":
-        st = "Активен 🟢" if is_running else "На паузе ⏸"
-        bot.answer_callback_query(call.id, f"Статус: {st} | Пар: 30 | Рынок: {mode.upper()}", show_alert=True)
+        bot.answer_callback_query(call.id, f"Статус: {'Работает 🟢' if is_running else 'Пауза ⏸'} | Пар: 30", show_alert=True)
+    elif call.data == "info":
+        bot.answer_callback_query(call.id, "Бот сам сканирует рынок и выбирает лучший индикатор!", show_alert=True)
 
     try:
         bot.edit_message_text(
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
-            text=f"🤖 <b>Панель управления Bybit AI Signals</b>\n\nМониторинг пар: <b>30 штук</b>\nРынок: <b>{mode.upper()}</b>\nСтратегия: <b>{strategy.upper()}</b>",
+            text=f"🤖 <b>Панель ИИ-Бот Авто-Сигналов</b>\n\nПар: <b>30</b> | Рынок: <b>{mode.upper()}</b>\nРежим: <b>Автоматический выбор стратегии</b>",
             parse_mode="HTML",
             reply_markup=get_main_keyboard()
         )
     except Exception:
         pass
 
-# --- 6. МОНИТОРИНГ И АНАЛИЗ РЫНКА ---
+# --- ЦИКЛ СКАНИРОВАНИЯ ---
 def analyze_market():
-    global is_running, mode, strategy, last_signals
+    global is_running, mode, last_signals
     
     while True:
         if is_running:
             for symbol in SYMBOLS:
                 prices = get_bybit_klines(symbol, mode)
-                if len(prices) < 25:
+                if len(prices) < 30:
                     continue
                     
                 current_price = prices[-1]
-                rsi_val = calculate_rsi(prices)
-                ema_9 = calculate_ema(prices, 9)
-                ema_21 = calculate_ema(prices, 21)
-                
-                signal_type = None
-                
-                if strategy == "rsi":
-                    # Смягченные пороги для частых сигналов
-                    if rsi_val <= 48:
-                        signal_type = "LONG 🟢 (RSI Зона покупки)"
-                    elif rsi_val >= 52:
-                        signal_type = "SHORT 🔴 (RSI Зона продажи)"
-                        
-                elif strategy == "ema_cross":
-                    if ema_9 > ema_21:
-                        signal_type = "LONG 🟢 (EMA 9 выше EMA 21)"
-                    elif ema_9 < ema_21:
-                        signal_type = "SHORT 🔴 (EMA 9 ниже EMA 21)"
-                        
-                elif strategy == "smart_trend":
-                    ema_50 = calculate_ema(prices, 50)
-                    if current_price > ema_50 and rsi_val > 48:
-                        signal_type = "LONG 🟢 (Бычий тренд выше EMA50)"
-                    elif current_price < ema_50 and rsi_val < 52:
-                        signal_type = "SHORT 🔴 (Медвежий тренд ниже EMA50)"
+                signal_type, reason = evaluate_auto_strategy(prices)
 
-                sig_key = f"{symbol}_{mode}_{strategy}"
+                sig_key = f"{symbol}_{mode}"
                 last_time = last_signals.get(sig_key, 0)
                 
-                # Уменьшили кулдаун до 60 секунд
+                # Кулдаун 60 секунд на одну пару
                 if signal_type and (time.time() - last_time > 60):
+                    rsi_val = calculate_rsi(prices)
                     msg = (
-                        f"🚨 <b>СИГНАЛ BYBIT [{mode.upper()}]</b>\n\n"
+                        f"🚨 <b>АВТО-СИГНАЛ BYBIT [{mode.upper()}]</b>\n\n"
                         f"<b>Монета:</b> #{symbol}\n"
-                        f"<b>Направление:</b> {signal_type}\n"
+                        f"<b>Вердикт:</b> {signal_type}\n"
+                        f"<b>Причина:</b> {reason}\n"
                         f"<b>Цена:</b> ${current_price}\n"
-                        f"<b>RSI:</b> {rsi_val}\n"
-                        f"<b>Стратегия:</b> {strategy.upper()}"
+                        f"<b>RSI:</b> {rsi_val}"
                     )
                     send_telegram(msg)
                     last_signals[sig_key] = time.time()
                 
                 time.sleep(0.2)
-        time.sleep(5)
+        # Повторный полный анализ каждые 60 секунд
+        time.sleep(60)
 
 def start_telebot():
     while True:
         try:
-            bot.polling(none_stop=True, timeout=60)
+            bot.remove_webhook()
+            time.sleep(1)
+            bot.polling(none_stop=True, interval=1, timeout=30, long_polling_timeout=30)
         except Exception as e:
             print(f"Ошибка Telebot: {e}", flush=True)
             time.sleep(5)
 
 if __name__ == "__main__":
-    threading.Thread(target=run_flask, daemon=True).start()
     threading.Thread(target=analyze_market, daemon=True).start()
-    
-    send_telegram("🚀 <b>Бот обновлен: повышенная чувствительность сигналов включена!</b>")
+    send_telegram("🚀 <b>ИИ-Бот обновлен: запущен автономный мульти-индикаторный анализ (30 пар)!</b>")
     start_telebot()
