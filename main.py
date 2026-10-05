@@ -34,17 +34,17 @@ SYMBOLS = [
 ]
 
 is_running = True
-mode = "futures"  # "spot" или "futures"
-strategy = "rsi"  # "smart_trend", "rsi", "ema_cross"
+mode = "futures"
+strategy = "rsi"
 last_signals = {}
 
 def send_telegram(text):
     try:
         bot.send_message(CHAT_ID, text, parse_mode="HTML")
     except Exception as e:
-        print(f"Ошибка отправки Telegram: {e}", flush=True)
+        print(f"Ошибка Telegram: {e}", flush=True)
 
-# --- 3. ИНДИКАТОРЫ ---
+# --- 3. РАСЧЕТ ИНДИКАТОРОВ ---
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1:
         return 50.0
@@ -101,7 +101,7 @@ def get_main_keyboard():
 
 @bot.message_handler(commands=['start'])
 def start_cmd(message):
-    bot.send_message(message.chat.id, "🤖 Бот подключен и готов к работе!", reply_markup=get_main_keyboard())
+    bot.send_message(message.chat.id, "🤖 Бот запущен и готов к работе!", reply_markup=get_main_keyboard())
 
 @bot.message_handler(func=lambda m: True)
 def handle_menu(message):
@@ -110,20 +110,20 @@ def handle_menu(message):
 
     if "Снайпер" in txt:
         strategy = "smart_trend"
-        bot.send_message(message.chat.id, "🎯 Стратегия изменена на: Умный Трендовый Снайпер", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, "🎯 Стратегия: Умный Трендовый Снайпер", reply_markup=get_main_keyboard())
     elif "Экстремальный RSI" in txt:
         strategy = "rsi"
-        bot.send_message(message.chat.id, "🔥 Стратегия изменена на: Экстремальный RSI", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, "🔥 Стратегия: Экстремальный RSI", reply_markup=get_main_keyboard())
     elif "Пересечение EMA" in txt:
         strategy = "ema_cross"
-        bot.send_message(message.chat.id, "📈 Стратегия изменена на: Пересечение EMA 9/21", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, "📈 Стратегия: Пересечение EMA 9/21", reply_markup=get_main_keyboard())
     elif "Приостановить" in txt or "Возобновить" in txt:
         is_running = not is_running
-        status = "работает" if is_running else "на паузе"
-        bot.send_message(message.chat.id, f"⏸ Состояние изменено: Бот {status}", reply_markup=get_main_keyboard())
+        status = "активен 🟢" if is_running else "на паузе ⏸"
+        bot.send_message(message.chat.id, f"Состояние: {status}", reply_markup=get_main_keyboard())
     elif "Переключить на" in txt:
         mode = "spot" if mode == "futures" else "futures"
-        bot.send_message(message.chat.id, f"🔄 Режим изменен на: {mode.upper()}", reply_markup=get_main_keyboard())
+        bot.send_message(message.chat.id, f"Режим: {mode.upper()}", reply_markup=get_main_keyboard())
     elif "Текущий статус" in txt:
         st = "Активен 🟢" if is_running else "На паузе ⏸"
         msg = f"<b>Статус:</b> {st}\n<b>Рынок:</b> {mode.upper()}\n<b>Стратегия:</b> {strategy.upper()}"
@@ -142,8 +142,6 @@ threading.Thread(target=start_telebot, daemon=True).start()
 # --- 5. АНАЛИЗ РЫНКА ---
 def analyze_market():
     global is_running, mode, strategy, last_signals
-    print(f"--- Сканирование рынка ({mode.upper()} | {strategy.upper()}) ---", flush=True)
-    
     category = "linear" if mode == "futures" else "spot"
     
     for symbol in SYMBOLS:
@@ -165,11 +163,8 @@ def analyze_market():
             ema_21 = calculate_ema(close_prices, 21)
             ema_200 = calculate_ema(close_prices, 200)
             
-            print(f"[{symbol}] Цена: {current_price} | RSI: {rsi_val}", flush=True)
-            
             signal_type = None
             
-            # Пороги индикаторов
             if strategy == "rsi":
                 if rsi_val <= 45:
                     signal_type = "BUY 🟢 (Перепроданность RSI)"
@@ -177,9 +172,9 @@ def analyze_market():
                     signal_type = "SELL 🔴 (Перекупленность RSI)"
             elif strategy == "ema_cross":
                 if ema_9 > ema_21 and close_prices[-2] <= calculate_ema(close_prices[:-1], 21):
-                    signal_type = "BUY 🟢 (Пересечение EMA 9/21 Вверх)"
+                    signal_type = "BUY 🟢 (Пересечение EMA Вверх)"
                 elif ema_9 < ema_21 and close_prices[-2] >= calculate_ema(close_prices[:-1], 21):
-                    signal_type = "SELL 🔴 (Пересечение EMA 9/21 Вниз)"
+                    signal_type = "SELL 🔴 (Пересечение EMA Вниз)"
             elif strategy == "smart_trend":
                 if current_price > ema_200 and rsi_val < 50:
                     signal_type = "BUY 🟢 (Трендовый откат EMA200)"
@@ -197,7 +192,6 @@ def analyze_market():
                 )
                 send_telegram(msg)
                 last_signals[f"{symbol}_{strategy}"] = time.time()
-                print(f">>> СИГНАЛ ОТПРАВЛЕН ПО {symbol}!", flush=True)
 
         except Exception as e:
             print(f"Ошибка {symbol}: {e}", flush=True)
@@ -207,7 +201,7 @@ def analyze_market():
 # --- 6. ОСНОВНОЙ ЦИКЛ ---
 def main_loop():
     time.sleep(3)
-    send_telegram("🤖 Бот успешно запущен на Render и начинает отправку сигналов!")
+    send_telegram("🤖 Бот успешно запущен на Render!")
     while True:
         if is_running:
             analyze_market()
